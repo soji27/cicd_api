@@ -15,7 +15,9 @@ const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL! });
 const prisma = new PrismaClient({ adapter });
 
 // ── Redis ─────────────────────────────────────────────────────────────────────
-const redis = createClient({ url: process.env.REDIS_URL || 'redis://localhost:6379' });
+const redis = createClient({
+  url: process.env.REDIS_URL || 'redis://localhost:6379',
+});
 redis.on('error', (err) => console.error('Redis error:', err));
 redis.connect().catch((err) => console.error('Redis connect failed:', err));
 
@@ -24,7 +26,10 @@ app.use(express.json());
 
 app.use((_req: Request, res: Response, next: NextFunction) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader(
+    'Access-Control-Allow-Methods',
+    'GET, POST, PUT, DELETE, OPTIONS'
+  );
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   next();
 });
@@ -54,157 +59,178 @@ app.get('/', (_req: Request, res: Response) => {
 });
 
 // GET /products?category=Audio
-app.get('/products', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { category } = req.query;
-    const cacheKey = category ? `products:category:${category}` : 'products:all';
+app.get(
+  '/products',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { category } = req.query;
+      const cacheKey = category
+        ? `products:category:${category}`
+        : 'products:all';
 
-    const cached = await getCache(cacheKey);
-    if (cached) {
-      res.setHeader('X-Cache', 'HIT');
-      res.json(cached);
-      return;
+      const cached = await getCache(cacheKey);
+      if (cached) {
+        res.setHeader('X-Cache', 'HIT');
+        res.json(cached);
+        return;
+      }
+
+      const products = await prisma.product.findMany({
+        where: category ? { category: String(category) } : undefined,
+        orderBy: { id: 'asc' },
+      });
+
+      await setCache(cacheKey, products);
+      res.setHeader('X-Cache', 'MISS');
+      res.json(products);
+    } catch (err) {
+      next(err);
     }
-
-    const products = await prisma.product.findMany({
-      where: category ? { category: String(category) } : undefined,
-      orderBy: { id: 'asc' },
-    });
-
-    await setCache(cacheKey, products);
-    res.setHeader('X-Cache', 'MISS');
-    res.json(products);
-  } catch (err) {
-    next(err);
   }
-});
+);
 
 // GET /products/:id
-app.get('/products/:id', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const id = parseInt(String(req.params.id), 10);
-    if (isNaN(id)) {
-      res.status(400).json({ error: 'Invalid product id' });
-      return;
-    }
+app.get(
+  '/products/:id',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = parseInt(String(req.params.id), 10);
+      if (isNaN(id)) {
+        res.status(400).json({ error: 'Invalid product id' });
+        return;
+      }
 
-    const cacheKey = `products:${id}`;
-    const cached = await getCache(cacheKey);
-    if (cached) {
-      res.setHeader('X-Cache', 'HIT');
-      res.json(cached);
-      return;
-    }
+      const cacheKey = `products:${id}`;
+      const cached = await getCache(cacheKey);
+      if (cached) {
+        res.setHeader('X-Cache', 'HIT');
+        res.json(cached);
+        return;
+      }
 
-    const product = await prisma.product.findUnique({ where: { id } });
-    if (!product) {
-      res.status(404).json({ error: 'Product not found' });
-      return;
-    }
+      const product = await prisma.product.findUnique({ where: { id } });
+      if (!product) {
+        res.status(404).json({ error: 'Product not found' });
+        return;
+      }
 
-    await setCache(cacheKey, product);
-    res.setHeader('X-Cache', 'MISS');
-    res.json(product);
-  } catch (err) {
-    next(err);
+      await setCache(cacheKey, product);
+      res.setHeader('X-Cache', 'MISS');
+      res.json(product);
+    } catch (err) {
+      next(err);
+    }
   }
-});
+);
 
 // POST /products
-app.post('/products', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { name, price, description, category, stock } = req.body;
+app.post(
+  '/products',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { name, price, description, category, stock } = req.body;
 
-    if (!name || typeof name !== 'string') {
-      res.status(400).json({ error: 'name is required and must be a string' });
-      return;
+      if (!name || typeof name !== 'string') {
+        res
+          .status(400)
+          .json({ error: 'name is required and must be a string' });
+        return;
+      }
+      if (price === undefined || typeof price !== 'number' || price < 0) {
+        res.status(400).json({
+          error: 'price is required and must be a non-negative number',
+        });
+        return;
+      }
+
+      const product = await prisma.product.create({
+        data: {
+          name,
+          price,
+          description: description ?? null,
+          category: category ?? null,
+          stock: stock ?? 0,
+        },
+      });
+
+      const keysToInvalidate = ['products:all'];
+      if (category) keysToInvalidate.push(`products:category:${category}`);
+      await invalidateCache(...keysToInvalidate);
+      res.status(201).json(product);
+    } catch (err) {
+      next(err);
     }
-    if (price === undefined || typeof price !== 'number' || price < 0) {
-      res.status(400).json({ error: 'price is required and must be a non-negative number' });
-      return;
-    }
-
-    const product = await prisma.product.create({
-      data: {
-        name,
-        price,
-        description: description ?? null,
-        category: category ?? null,
-        stock: stock ?? 0,
-      },
-    });
-
-    const keysToInvalidate = ['products:all'];
-    if (category) keysToInvalidate.push(`products:category:${category}`);
-    await invalidateCache(...keysToInvalidate);
-    res.status(201).json(product);
-  } catch (err) {
-    next(err);
   }
-});
+);
 
 // PUT /products/:id
-app.put('/products/:id', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const id = parseInt(String(req.params.id), 10);
-    if (isNaN(id)) {
-      res.status(400).json({ error: 'Invalid product id' });
-      return;
+app.put(
+  '/products/:id',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = parseInt(String(req.params.id), 10);
+      if (isNaN(id)) {
+        res.status(400).json({ error: 'Invalid product id' });
+        return;
+      }
+
+      const { name, price, description, category, stock } = req.body;
+
+      if (price !== undefined && (typeof price !== 'number' || price < 0)) {
+        res.status(400).json({ error: 'price must be a non-negative number' });
+        return;
+      }
+
+      const existing = await prisma.product.findUnique({ where: { id } });
+      if (!existing) {
+        res.status(404).json({ error: 'Product not found' });
+        return;
+      }
+
+      const updated = await prisma.product.update({
+        where: { id },
+        data: {
+          ...(name !== undefined && { name }),
+          ...(price !== undefined && { price }),
+          ...(description !== undefined && { description }),
+          ...(category !== undefined && { category }),
+          ...(stock !== undefined && { stock }),
+        },
+      });
+
+      await invalidateCache(`products:${id}`, 'products:all');
+      res.json(updated);
+    } catch (err) {
+      next(err);
     }
-
-    const { name, price, description, category, stock } = req.body;
-
-    if (price !== undefined && (typeof price !== 'number' || price < 0)) {
-      res.status(400).json({ error: 'price must be a non-negative number' });
-      return;
-    }
-
-    const existing = await prisma.product.findUnique({ where: { id } });
-    if (!existing) {
-      res.status(404).json({ error: 'Product not found' });
-      return;
-    }
-
-    const updated = await prisma.product.update({
-      where: { id },
-      data: {
-        ...(name !== undefined && { name }),
-        ...(price !== undefined && { price }),
-        ...(description !== undefined && { description }),
-        ...(category !== undefined && { category }),
-        ...(stock !== undefined && { stock }),
-      },
-    });
-
-    await invalidateCache(`products:${id}`, 'products:all');
-    res.json(updated);
-  } catch (err) {
-    next(err);
   }
-});
+);
 
 // DELETE /products/:id
-app.delete('/products/:id', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const id = parseInt(String(req.params.id), 10);
-    if (isNaN(id)) {
-      res.status(400).json({ error: 'Invalid product id' });
-      return;
-    }
+app.delete(
+  '/products/:id',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = parseInt(String(req.params.id), 10);
+      if (isNaN(id)) {
+        res.status(400).json({ error: 'Invalid product id' });
+        return;
+      }
 
-    const existing = await prisma.product.findUnique({ where: { id } });
-    if (!existing) {
-      res.status(404).json({ error: 'Product not found' });
-      return;
-    }
+      const existing = await prisma.product.findUnique({ where: { id } });
+      if (!existing) {
+        res.status(404).json({ error: 'Product not found' });
+        return;
+      }
 
-    await prisma.product.delete({ where: { id } });
-    await invalidateCache(`products:${id}`, 'products:all');
-    res.status(204).send();
-  } catch (err) {
-    next(err);
+      await prisma.product.delete({ where: { id } });
+      await invalidateCache(`products:${id}`, 'products:all');
+      res.status(204).send();
+    } catch (err) {
+      next(err);
+    }
   }
-});
+);
 
 // ── Error handler ─────────────────────────────────────────────────────────────
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
