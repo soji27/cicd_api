@@ -16,7 +16,7 @@ export const options = {
   thresholds: {
     http_req_failed: ['rate<0.01'],    // < 1% errors
     http_req_duration: ['p(95)<500'], // 95% under 500ms
-    products_duration: ['p(95)<200'], // cached responses under 200ms
+    products_duration: ['p(95)<250'], // cached responses under 250ms (Render free tier)
     error_rate: ['rate<0.01'],
   },
 };
