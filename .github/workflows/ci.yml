@@ -72,8 +72,8 @@ jobs:
           context: .
           push: true
           tags: |
-            aissaninadia/ci-cd-api:latest
-            aissaninadia/ci-cd-api:${{ steps.meta.outputs.image_tag }}
+            soji27/ci-cd-api:latest
+            soji27/ci-cd-api:${{ steps.meta.outputs.image_tag }}
 
   # ── Job 3 : Deploy to Render ─────────────────────────────────────────────────
   deploy:
