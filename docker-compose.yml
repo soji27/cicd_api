@@ -1,28 +1,45 @@
 services:
+  api:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/cicd_db
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
   db:
     image: postgres:16-alpine
-    container_name: ci-cd-db
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: ci_cd_api
-    ports:
-      - '5432:5432'
+      POSTGRES_DB: cicd_db
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
 
-  api:
-    build:
-      context: .
-      dockerfile: .Dockerfile
-    container_name: ci-cd-api
+  redis:
+    image: redis:7-alpine
     ports:
-      - '3000:3000'
-    environment:
-      DATABASE_URL: postgresql://postgres:postgres@db:5432/ci_cd_api?schema=public
-      NODE_ENV: production
-    depends_on:
-      - db
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
 
 volumes:
   postgres_data:
