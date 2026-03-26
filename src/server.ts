@@ -17,7 +17,7 @@ const prisma = new PrismaClient({ adapter });
 // ── Redis ─────────────────────────────────────────────────────────────────────
 const redis = createClient({ url: process.env.REDIS_URL || 'redis://localhost:6379' });
 redis.on('error', (err) => console.error('Redis error:', err));
-redis.connect();
+redis.connect().catch((err) => console.error('Redis connect failed:', err));
 
 // ── Middleware ────────────────────────────────────────────────────────────────
 app.use(express.json());
